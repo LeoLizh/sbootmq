@@ -1,0 +1,610 @@
+博客微博相册收藏留言关于我
+  
+95. Spring Boot之ActiveMQ的topic和queue【从零开始学Spring Boot】
+博客分类： 从零开始学Spring Boot
+spring bootspring boot实战spring boot教程从零开始学Spring Boot
+经网友意见，发布了此篇文章，在之前的一篇文章【72. Spring Boot集成ActiveMQ】我们介绍过spring boot怎么集成activeMQ，之前我们的例子中只是消息模型中的一种。
+
+       JMS规范两种常用的消息模型：点对点（point  to point ,queue）和发布/订阅（publish/subscribe,topic）。
+
+       点对点：消息生产者生产消息发布到queue中，然后消息消费者从queue中取出，并且消费消息。这里需要注意：消息被消费者消费以后，queue中不再有存储，所以消息消费者不可消费到已经被消费的消息。Queue支持存在多个消息消费者，但是对一个消息而言，只会有一个消费者可以消费。
+
+       发布/订阅：消息生产者（发布）将消息发布到topic中，同时有多个消息消费者（订阅）消费该消息。和点对点方式不同，发布到topic的消息会被所有订阅者消费。
+
+ 
+
+       在之前的【72. Spring Boot集成ActiveMQ】中我们的例子中很实用了queue的方式，也就是点对点的方式，那么怎么切换为发布/订阅的消息模型呢。好了，这就是我们本章好解决的重点，另外就是如何在一个工程中即使用 queue的方式也使用 topic的方式。
+
+抛出了本章的问题，那么看看本章的大纲吧：
+
+本章大纲 写道
+（1）spring boot ActiveMQ之发布/订阅消息模型使用；
+（2）spring boot ActiveMQ 之queue and topic ;
+ 
+
+ 
+
+ 
+
+接下来我们看看具体怎么操作？
+
+（1）spring boot ActiveMQ之发布/订阅消息模型使用；
+
+       这里不就不重新搭建工程了，我们在【72. Spring Boot集成ActiveMQ】的博客中的基础上继续研究。
+
+       首先我们对我们的消息生成进行一定的改造。
+
+第一步在App.java中声明一个ActiveMQTopic，具体代码如下：
+
+package com.kfit;
+ 
+import javax.jms.Queue;
+import javax.jms.Topic;
+ 
+import org.apache.activemq.command.ActiveMQQueue;
+import org.apache.activemq.command.ActiveMQTopic;
+import org.springframework.boot.SpringApplication;
+import org.springframework.boot.autoconfigure.SpringBootApplication;
+import org.springframework.context.annotation.Bean;
+ 
+/**
+ *
+ * @author Angel --守护天使
+ * @version v.0.1
+ * @date 2016年8月23日
+ */
+@SpringBootApplication
+public class App {
+    @Bean
+    public Queue queue() {
+       return new ActiveMQQueue("sample.queue");
+    }
+   
+    @Bean
+    public Topic topic() {
+       return new ActiveMQTopic("sample.topic");
+    }
+   
+//  @Bean
+//  public DefaultMessageListenerContainer jmsListenerContainerFactory() {
+//     DefaultMessageListenerContainer  dmlc = new DefaultMessageListenerContainer();
+//      dmlc.setPubSubDomain(true);
+//      // Other configuration here
+//      return dmlc;
+//  }
+   
+    public static void main(String[] args) {
+       SpringApplication.run(App.class, args);
+    }
+}
+       这里比之前多了一个topic()方法。
+
+ 
+
+第二步就是改造消息生成者Producer，定义Topic类，在定时发送的时候发送到topic上，具体代码如下：
+
+ 
+
+package com.kfit.demo;
+ 
+import javax.jms.Queue;
+import javax.jms.Topic;
+ 
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsMessagingTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+ 
+/**
+ * 消息生产者.
+ * @author Angel --守护天使
+ * @version v.0.1
+ * @date 2016年8月23日
+ */
+@Component
+@EnableScheduling
+public class Producer {
+   
+    @Autowired
+    private JmsMessagingTemplate jmsMessagingTemplate;
+   
+    @Autowired
+    private Queue queue;
+   
+    @Autowired
+    private Topic topic;
+   
+    @Scheduled(fixedDelay=3000)//每3s执行1次
+    public void send() {
+       //send queue.
+       this.jmsMessagingTemplate.convertAndSend(this.queue, "hi,activeMQ");
+       //send topic.
+       this.jmsMessagingTemplate.convertAndSend(this.topic, "hi,activeMQ(topic)");
+    }
+   
+}
+ 
+
+第三步：定义消息消费者Consumer2，Consumer3，具体代码如下：
+
+Consumer2：
+
+package com.kfit.demo;
+import org.springframework.jms.annotation.JmsListener;
+import org.springframework.stereotype.Component;
+ 
+/**
+ * 消息消费者.
+ * @author Angel --守护天使
+ * @version v.0.1
+ * @date 2016年8月23日
+ */
+@Component
+public class Consumer2 {
+    @JmsListener(destination = "sample.topic")
+    public void receiveQueue(String text) {
+       System.out.println("Consumer2="+text);
+    }
+}
+Consumer3：
+
+package com.kfit.demo;
+import org.springframework.jms.annotation.JmsListener;
+import org.springframework.stereotype.Component;
+ 
+/**
+ * 消息消费者.
+ * @author Angel --守护天使
+ * @version v.0.1
+ * @date 2016年8月23日
+ */
+@Component
+public class Consumer3 {
+    @JmsListener(destination = "sample.topic")
+    public void receiveQueue(String text) {
+       System.out.println("Consumer3="+text);
+    }
+}
+到这里进行测试不会看到我们想要的效果的，这个主要是因为默认情况下，spring boot的jms配置是queue的方式，所以我们需要进行指定为topic的方式。
+
+ 
+
+第四步：配置消息模型为pub/sub方式，在application.properties添加如下配置信息：
+
+spring.jms.pub-sub-domain=true
+
+这里简单对这个配置说明下：如果为True，则是Topic；如果是false或者默认，则是queue。
+
+       这时候重新启动App.java,可以看到如下的打印信息：
+
+Consumer2=hi,activeMQ(topic)
+Consumer2=hi,activeMQ(topic)
+Consumer3=hi,activeMQ(topic)
+Consumer2=hi,activeMQ(topic)
+Consumer3=hi,activeMQ(topic)
+
+       好了到这里我们就实现了发布/订阅的消息模式，但是我们会发现另外问题了，queue的好不像不能使用了，我们会想，如果只是单纯的使用消息模型的话，那么没有问题，通过配置文件配置就好了，但是如果想使用多种消息模型的话，那么怎么办呢？
+
+ 
+
+（2）spring boot ActiveMQ 之queue and topic ;
+
+ 
+       对于同时支持queue和topic目前还没找到完美的解决方案，现在的思路就是：定义过个JmsListenerContainerFactory去实现，后续博主会关注这个部分，然后有新的方案会在博客中进行更新发布。有更好的方案的博友们也可以给我留言，告知，感激不尽。
+
+分享到：    
+96. Spring Boot之静态资源版本映射(解决 ... | 94.Spring Boot集成Jersey【从零开始学Spri ...
+2016-11-15 22:20浏览 7060评论(8)分类:编程语言相关推荐
+参考知识库
+
+Android知识库
+36248  关注 | 3137  收录
+
+React知识库
+3122  关注 | 393  收录
+
+人工智能基础知识库
+15125  关注 | 208  收录
+
+Java 知识库
+31308  关注 | 3747  收录
+评论
+8 楼 林祥纤 2017-06-09  
+xxwkof 写道
+topic和queue共存
+引用
+
+http://www.jianshu.com/p/d8d73c872665
+Java代码  
+@Configuration  
+@EnableJms  
+public class JmsConfiguration {  
+    // topic模式的ListenerContainer  
+    @Bean  
+    public JmsListenerContainerFactory<?> jmsListenerContainerTopic(ConnectionFactory activeMQConnectionFactory) {  
+        DefaultJmsListenerContainerFactory bean = new DefaultJmsListenerContainerFactory();  
+        bean.setPubSubDomain(true);  
+        bean.setConnectionFactory(activeMQConnectionFactory);  
+        return bean;  
+    }  
+    // queue模式的ListenerContainer  
+    @Bean  
+    public JmsListenerContainerFactory<?> jmsListenerContainerQueue(ConnectionFactory activeMQConnectionFactory) {  
+        DefaultJmsListenerContainerFactory bean = new DefaultJmsListenerContainerFactory();  
+        bean.setConnectionFactory(activeMQConnectionFactory);  
+        return bean;  
+    }  
+}  
+
+
+
+赞
+7 楼 xxwkof 2017-06-08  
+topic和queue共存
+引用
+
+http://www.jianshu.com/p/d8d73c872665
+Java代码  
+@Configuration  
+@EnableJms  
+public class JmsConfiguration {  
+    // topic模式的ListenerContainer  
+    @Bean  
+    public JmsListenerContainerFactory<?> jmsListenerContainerTopic(ConnectionFactory activeMQConnectionFactory) {  
+        DefaultJmsListenerContainerFactory bean = new DefaultJmsListenerContainerFactory();  
+        bean.setPubSubDomain(true);  
+        bean.setConnectionFactory(activeMQConnectionFactory);  
+        return bean;  
+    }  
+    // queue模式的ListenerContainer  
+    @Bean  
+    public JmsListenerContainerFactory<?> jmsListenerContainerQueue(ConnectionFactory activeMQConnectionFactory) {  
+        DefaultJmsListenerContainerFactory bean = new DefaultJmsListenerContainerFactory();  
+        bean.setConnectionFactory(activeMQConnectionFactory);  
+        return bean;  
+    }  
+}  
+
+6 楼 林祥纤 2017-05-23  
+lyongx 写道
+  
+spring.jms.pub-sub-domain=true
+楼主是对的。queue不能用了。
+
+
+
+有网友说：1.5.3可以了，还没测试！
+5 楼 林祥纤 2017-05-23  
+lyongx 写道
+测试：有springboot1.5.3下，spring.jms.pub-sub-domain=true
+同时queue也能用。
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-parent</artifactId>
+<version>1.5.3.RELEASE</version>
+<relativePath/> <!-- lookup parent from repository -->
+
+
+console如下：
+Received(queue1) <16:53:13>
+Received(queue2): <echo: 16:53:13>
+Received(topic1 by 2) <test topic 16:53:13>
+Received(topic1 by 1) <test topic 16:53:13>
+
+
+
+那真是太赞了....
+4 楼 lyongx 2017-05-22  
+  
+spring.jms.pub-sub-domain=true
+楼主是对的。queue不能用了。
+3 楼 lyongx 2017-05-22  
+测试：有springboot1.5.3下，spring.jms.pub-sub-domain=true
+同时queue也能用。
+<groupId>org.springframework.boot</groupId>
+<artifactId>spring-boot-starter-parent</artifactId>
+<version>1.5.3.RELEASE</version>
+<relativePath/> <!-- lookup parent from repository -->
+
+
+console如下：
+Received(queue1) <16:53:13>
+Received(queue2): <echo: 16:53:13>
+Received(topic1 by 2) <test topic 16:53:13>
+Received(topic1 by 1) <test topic 16:53:13>
+2 楼 林祥纤 2017-04-26  
+z673182 写道
+可以 提供 源码吗
+
+
+这个比较简单，按照步骤操作既可以成功的；如果还是不行的话，可以加群，要源码 。
+1 楼 z673182 2017-04-26  
+可以 提供 源码吗
+发表评论
+  您还没有登录,请您登录后再发表评论
+  
+  
+  
+  消息的发布有2种形式, 队列式(点对点) 和主题式(pub/sub) 模式, 队列式发布后, 接收者从队列中获取消息后, 消息就会消失, 但任意消费者都可以从队列中接受消息, 消息只能被接受一次
+
+主题式则为接受后消息不消失
+
+JMS 是(java message service) 是 基于JVM代理的规范, ActiveMQ是他的一种实现
+
+
+2、JMS消息基本组件
+
+2.1、ConnectionFactory
+
+创建Connection对象的工厂，针对两种不同的jms消息模型，分别有QueueConnectionFactory和TopicConnectionFactory两种。可以通过JNDI来查找ConnectionFactory对象。
+
+2.2、Destination
+
+Destination的意思是消息生产者的消息发送目标或者说消息消费者的消息来源。对于消息生产者来说，它的Destination是某个队列（Queue）或某个主题（Topic）;对于消息消费者来说，它的Destination也是某个队列或主题（即消息来源）。
+
+所以，Destination实际上就是两种类型的对象：Queue、Topic可以通过JNDI来查找Destination。
+
+2.3、Connection
+
+Connection表示在客户端和JMS系统之间建立的链接（对TCP/IP socket的包装）。Connection可以产生一个或多个Session。跟ConnectionFactory一样，Connection也有两种类型：QueueConnection和TopicConnection。
+
+2.4、Session
+
+Session是操作消息的接口。可以通过session创建生产者、消费者、消息等。Session提供了事务的功能。当需要使用session发送/接收多个消息时，可以将这些发送/接收动作放到一个事务中。同样，也分QueueSession和TopicSession。
+
+2.5、消息的生产者
+
+消息生产者由Session创建，并用于将消息发送到Destination。同样，消息生产者分两种类型：QueueSender和TopicPublisher。可以调用消息生产者的方法（send或publish方法）发送消息。
+
+2.6、消息消费者
+
+消息消费者由Session创建，用于接收被发送到Destination的消息。两种类型：QueueReceiver和TopicSubscriber。可分别通过session的createReceiver(Queue)或createSubscriber(Topic)来创建。当然，也可以session的creatDurableSubscriber方法来创建持久化的订阅者。
+
+2.7、MessageListener
+
+消息监听器。如果注册了消息监听器，一旦消息到达，将自动调用监听器的onMessage方法。EJB中的MDB（Message-Driven Bean）就是一种MessageListener。
+
+ 
+
+1, 安装activeMQ
+
+1), linux安装
+
+访问: http://activemq.apache.org/activemq-5111-release.html
+2), docker安装
+
+sudo docker run -d -p 61616:61616 -p 8161:8161 cloudesire/activemq
+安装成功后, 可访问: 
+
+
+
+ 
+
+3) 使用springboot的内嵌 activemq
+
+
+ <!--springboot 内嵌 activemq-->
+        <dependency>
+            <groupId>org.apacke.activemq</groupId>
+            <artifactId>activemq-broker</artifactId>
+        </dependency>
+
+2, 新建springboot项目
+
+1), 添加依赖
+
+
+<dependency>
+            <groupId>org.springframework</groupId>
+            <artifactId>spring-jms</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.activemq</groupId>
+            <artifactId>activemq-client</artifactId>
+        </dependency>
+
+2), 添加配置:  
+
+spring: 
+  activemq:
+    broker-url: tcp://192.168.50.202:61616
+支持的配置有: 
+
+  activemq:
+    broker-url: tcp://192.168.50.202:61616
+    user:
+    password:
+    in-memory:
+3) 消息发送者: 
+
+
+package com.wenbronk.enterprise.jms.message;
+
+import org.springframework.jms.core.MessageCreator;
+
+import javax.jms.JMSException;
+import javax.jms.Message;
+import javax.jms.Session;
+
+/**
+ * 消息创建者
+ * Created by wenbronk on 2017/6/13.
+ */
+public class CreateMessage implements MessageCreator{
+    @Override
+    public Message createMessage(Session session) throws JMSException {
+        return session.createTextMessage("测试消息");
+    }
+}
+
+4) 消息接受着: 
+
+
+package com.wenbronk.enterprise.jms.message;
+
+import org.springframework.jms.annotation.JmsListener;
+import org.springframework.stereotype.Component;
+
+/**
+ * 消息接受者
+ * Created by wenbronk on 2017/6/13.
+ */
+@Component
+public class ReceiMessage {
+
+    /**
+     * 使用 @JmsListener 指定要监听的域, 有消息发送时就会发送到此域中
+     * @param message
+     */
+    @JmsListener(destination = "my-destination")
+    public void receiveMessage(String message) {
+        System.out.println("接受到的消息是: " + message);
+    }
+
+}
+
+5), 消息发送: 
+
+
+package com.wenbronk.enterprise.jms.config;
+
+import com.wenbronk.enterprise.jms.message.CreateMessage;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.CommandLineRunner;
+import org.springframework.jms.core.JmsTemplate;
+import org.springframework.stereotype.Component;
+
+/**
+ * 消息发送及目的地定义
+ * 实现commandLineRunner, 使得程序启动后执行该类的run() 方法
+ * Created by wenbronk on 2017/6/13.
+ */
+@Component
+public class MessageConfig implements CommandLineRunner {
+
+    @Autowired
+    private JmsTemplate jmsTemplate;
+
+    /**
+     * 消息域为  my-destination
+     * 发送者为 createMessage()
+     * @param args
+     * @throws Exception
+     */
+    @Override
+    public void run(String... args) throws Exception {
+        jmsTemplate.send("my-destination", new CreateMessage());
+    }
+}
+
+ 
+
+ 
+
+如果想自定义使用 topic 或者 queue 模式, 需要自己指定: 
+
+MessageConfig
+
+
+package com.wenbronk.enterprise.jms.config;
+
+import org.apache.activemq.command.ActiveMQQueue;
+import org.apache.activemq.command.ActiveMQTopic;
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+
+import javax.jms.Queue;
+import javax.jms.Topic;
+
+/**
+ * 创建 点对点模式的对象和发布订阅模式的对象
+ * Created by wenbronk on 2017/6/13.
+ */
+@Configuration
+public class TopicConfig {
+    @Bean
+    public Queue queue() {
+        return new ActiveMQQueue("sample.queue");
+    }
+
+    @Bean
+    public Topic topic() {
+        return new ActiveMQTopic("sample.topic");
+    }
+}
+
+消息发布者:
+
+
+package com.wenbronk.enterprise.jms.producer;
+
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.jms.core.JmsMessagingTemplate;
+import org.springframework.scheduling.annotation.EnableScheduling;
+import org.springframework.scheduling.annotation.Scheduled;
+import org.springframework.stereotype.Component;
+
+import javax.jms.Queue;
+import javax.jms.Topic;
+
+/**
+ * 点对点和订阅模式的消息发布
+ * Created by wenbronk on 2017/6/13.
+ */
+@Component
+@EnableScheduling
+public class MessageProducer {
+
+    @Autowired
+    private JmsMessagingTemplate jmsMessagingTemplate;
+
+    @Autowired
+    private Queue queue;
+
+    @Autowired
+    private Topic topic;
+
+    @Scheduled(fixedDelay=3000)//每3s执行1次
+    public void send() {
+        //send queue.
+        this.jmsMessagingTemplate.convertAndSend(this.queue, "hi,activeMQ");
+        //send topic.
+        this.jmsMessagingTemplate.convertAndSend(this.topic, "hi,activeMQ(topic)");
+    }
+
+}
+
+消息接受者
+
+
+package com.wenbronk.enterprise.jms.message;
+
+import org.springframework.jms.annotation.JmsListener;
+import org.springframework.stereotype.Component;
+
+/**
+ * 点对点和订阅模式的消息接受着
+ * Created by wenbronk on 2017/6/13.
+ */
+@Component
+public class MessageConsumer {
+
+    @JmsListener(destination = "sample.topic")
+    public void receiveQueue(String text) {
+        System.out.println("Consumer2="+text);
+    }
+
+    @JmsListener(destination = "sample.topic")
+    public void receiveTopic(String text) {
+        System.out.println("Consumer3="+text);
+    }
+
+}
+
+需要在配置文件中开启　发布订阅模式的支持：　
+
+spring:   
+　activemq:
+    broker-url: tcp://192.168.50.202:61616
+  jms:
+    pub-sub-domain: true
